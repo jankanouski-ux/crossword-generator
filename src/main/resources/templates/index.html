@@ -69,7 +69,7 @@
         <p>Выберите сложность и размер сетки — остальное мы возьмём на себя.</p>
       </section>
 
-      <form class="card" id="generator">
+      <form class="card" id="generator" th:action= "@{/generate}" method= "post">
         <div class="card__stripe" aria-hidden="true"></div>
 
         <div class="card__body">
