@@ -1,20 +1,29 @@
 package com.example.crossword_generator.model;
 
+/**
+ * Одно слово. Задание лежит в клетке (clueRow, clueCol),
+ * ответ начинается в клетке (startRow, startCol) и идёт вправо или вниз.
+ */
 public record Entry(String answer, String clue,
-                    int clueRow, int clueCol, Direction direction) {
+                    int clueRow, int clueCol,
+                    int startRow, int startCol,
+                    Direction direction) {
 
-    /** Строка, где стоит первая буква ответа. */
-    public int startRow() {
-        return direction == Direction.DOWN ? clueRow + 1 : clueRow;
+    private static final String[][] ARROWS = {
+            {"↖", "↑", "↗"},
+            {"←", "", "→"},
+            {"↙", "↓", "↘"}
+    };
+
+    public Entry withClue(String newClue) {
+        return new Entry(answer, newClue, clueRow, clueCol, startRow, startCol, direction);
     }
 
-    /** Колонка, где стоит первая буква ответа. */
-    public int startCol() {
-        return direction == Direction.RIGHT ? clueCol + 1 : clueCol;
-    }
-
-    /** Стрелка для показа в клетке. */
+    /** Первая стрелка: где начинается слово. Вторая (если нужна): куда оно идёт. */
     public String arrow() {
-        return direction == Direction.RIGHT ? "→" : "↓";
+        String where = ARROWS[Integer.signum(startRow - clueRow) + 1]
+                [Integer.signum(startCol - clueCol) + 1];
+        String dir = direction == Direction.RIGHT ? "→" : "↓";
+        return where.equals(dir) ? where : where + dir;
     }
 }
