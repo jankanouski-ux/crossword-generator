@@ -1,12 +1,12 @@
 package com.example.crossword_generator.generator;
 
+import com.example.crossword_generator.generator.TemplateGenerator.Slot;
 import com.example.crossword_generator.model.Direction;
 import com.example.crossword_generator.model.Entry;
 import com.example.crossword_generator.model.Puzzle;
 
 import java.util.ArrayList;
 import java.util.BitSet;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -16,37 +16,14 @@ import java.util.Set;
 
 public class GridGenerator {
 
-    private static final int MIN_LEN = 3;
-    private static final int MAX_LEN = 9;
-    private static final int BRANCH = 25;        // сколько слов пробуем на каждом шаге
-    private static final int NODE_LIMIT = 2000;  // шагов поиска на одну попытку
-    private static final int RESTARTS = 3;       // попыток на один шаблон
-    private static final long TIME_LIMIT_MS = 10000;
-    private static final int ALPHABET = 32;      // А..Я
+    private static final int NODE_LIMIT = 3000;   // шагов поиска на одну попытку
+    private static final int RESTARTS = 3;        // попыток на один шаблон
+    private static final int BRANCH = 40;         // сколько слов пробуем на каждом шаге
+    private static final long TIME_LIMIT_MS = 20000;
+    private static final int ALPHABET = 32;       // А..Я
 
     private final Random random = new Random();
-
-    // Окно под слово: отрезок клеток + клетка-задание
-    private static class Slot {
-        final int startRow, startCol, length;
-        final Direction dir;
-        int clueRow, clueCol;
-
-        Slot(int startRow, int startCol, Direction dir, int length) {
-            this.startRow = startRow;
-            this.startCol = startCol;
-            this.dir = dir;
-            this.length = length;
-        }
-
-        int row(int i) {
-            return startRow + (dir == Direction.DOWN ? i : 0);
-        }
-
-        int col(int i) {
-            return startCol + (dir == Direction.RIGHT ? i : 0);
-        }
-    }
+    private final TemplateGenerator templateGenerator = new TemplateGenerator();
 
     // Слова одной длины + индекс «позиция, буква -> слова»
     private static class Bucket {
@@ -74,41 +51,24 @@ public class GridGenerator {
 
     // synchronized: объект общий для всех запросов, а состояние хранится в полях
     public synchronized Puzzle generate(int size, List<String> words) {
-        int maxLen = Math.min(MAX_LEN, size - 1);
-        buckets = buildBuckets(words, maxLen);
-
+        buckets = buildBuckets(words);
         best = new ArrayList<>();
         bestCount = -1;
         deadline = System.currentTimeMillis() + TIME_LIMIT_MS;
 
-        double p = 0.2;       // доля клеток-заданий, подстраивается сама
-        int rejected = 0;
-        int templates = 0;
         boolean complete = false;
+        int templates = 0;
 
         while (!complete && System.currentTimeMillis() < deadline) {
-            // ЭТАП 1: шаблон
-            boolean[][] clue = makeTemplate(size, maxLen, p);
-            int clues = countTrue(clue);
-            List<Slot> list = buildSlots(clue);
-
-            // слов больше, чем заданий -> заданий нужно больше, и наоборот
-            if (list.size() > clues) {
-                p = Math.min(0.45, p + 0.01);
-            } else if (list.size() < clues) {
-                p = Math.max(0.10, p - 0.01);
-            }
-
-            int allowedExtra = rejected / 300; // лишние клетки-задания (будут пустыми)
-            if (list.isEmpty() || clues - list.size() > allowedExtra
-                    || !assignClues(clue, list)) {
-                rejected++;
+            // ЭТАП 1: готовая конфигурация без слов
+            TemplateGenerator.Template t = templateGenerator.generate(size);
+            if (t == null || t.cost != 0 || t.slots.isEmpty()) {
                 continue;
             }
-            slots = list;
+            slots = t.slots;
             templates++;
 
-            // ЭТАП 2: слова под готовый шаблон
+            // ЭТАП 2: слова под эту конфигурацию
             for (int attempt = 0; attempt < RESTARTS && !complete
                     && System.currentTimeMillis() < deadline; attempt++) {
                 grid = new char[size][size];
@@ -122,250 +82,20 @@ public class GridGenerator {
             }
         }
 
-        System.out.println("Шаблонов: " + templates + ", слов в лучшем: "
+        System.out.println("Шаблонов: " + templates + ", слов в результате: "
                 + best.size() + ", полностью: " + complete);
         return new Puzzle(size, best);
     }
 
-    // ---------- ЭТАП 1: шаблон ----------
-
-    // true в массиве = клетка с заданием
-    private boolean[][] makeTemplate(int n, int maxLen, double p) {
-        boolean[][] clue = new boolean[n][n];
-        for (int r = 0; r < n; r++) {
-            for (int c = 0; c < n; c++) {
-                clue[r][c] = random.nextDouble() < p;
-            }
-        }
-        clue[0][0] = true;
-
-        // Чиним, пока есть нарушения. Задания только добавляются,
-        // поэтому цикл обязательно закончится.
-        boolean changed = true;
-        while (changed) {
-            changed = false;
-
-            // цепочки букв по горизонтали: длина 2 или больше максимума нельзя
-            for (int r = 0; r < n; r++) {
-                int c = 0;
-                while (c < n) {
-                    if (clue[r][c]) {
-                        c++;
-                        continue;
-                    }
-                    int start = c;
-                    while (c < n && !clue[r][c]) {
-                        c++;
-                    }
-                    int len = c - start;
-                    if (len == 2 || len > maxLen) {
-                        clue[r][start + random.nextInt(len)] = true;
-                        changed = true;
-                    }
-                }
-            }
-            // по вертикали
-            for (int c = 0; c < n; c++) {
-                int r = 0;
-                while (r < n) {
-                    if (clue[r][c]) {
-                        r++;
-                        continue;
-                    }
-                    int start = r;
-                    while (r < n && !clue[r][c]) {
-                        r++;
-                    }
-                    int len = r - start;
-                    if (len == 2 || len > maxLen) {
-                        clue[start + random.nextInt(len)][c] = true;
-                        changed = true;
-                    }
-                }
-            }
-            // буква, не входящая ни в одно слово, становится заданием
-            for (int r = 0; r < n; r++) {
-                for (int c = 0; c < n; c++) {
-                    if (!clue[r][c] && hLen(clue, r, c) < MIN_LEN && vLen(clue, r, c) < MIN_LEN) {
-                        clue[r][c] = true;
-                        changed = true;
-                    }
-                }
-            }
-        }
-        return clue;
-    }
-
-    private int countTrue(boolean[][] a) {
-        int count = 0;
-        for (boolean[] row : a) {
-            for (boolean v : row) {
-                if (v) {
-                    count++;
-                }
-            }
-        }
-        return count;
-    }
-
-    private int rightRun(boolean[][] clue, int r, int c) {
-        int len = 0;
-        while (c + len < clue.length && !clue[r][c + len]) {
-            len++;
-        }
-        return len;
-    }
-
-    private int downRun(boolean[][] clue, int r, int c) {
-        int len = 0;
-        while (r + len < clue.length && !clue[r + len][c]) {
-            len++;
-        }
-        return len;
-    }
-
-    // длина горизонтальной цепочки, в которой стоит клетка
-    private int hLen(boolean[][] clue, int r, int c) {
-        int left = c;
-        while (left - 1 >= 0 && !clue[r][left - 1]) {
-            left--;
-        }
-        return rightRun(clue, r, left);
-    }
-
-    // длина вертикальной цепочки, в которой стоит клетка
-    private int vLen(boolean[][] clue, int r, int c) {
-        int top = r;
-        while (top - 1 >= 0 && !clue[top - 1][c]) {
-            top--;
-        }
-        return downRun(clue, top, c);
-    }
-
-    // Каждая цепочка из 3+ букв закрепляется за одним словом
-    private List<Slot> buildSlots(boolean[][] clue) {
-        int n = clue.length;
-        List<Slot> list = new ArrayList<>();
-        for (int r = 0; r < n; r++) {
-            int c = 0;
-            while (c < n) {
-                if (clue[r][c]) {
-                    c++;
-                    continue;
-                }
-                int start = c;
-                while (c < n && !clue[r][c]) {
-                    c++;
-                }
-                if (c - start >= MIN_LEN) {
-                    list.add(new Slot(r, start, Direction.RIGHT, c - start));
-                }
-            }
-        }
-        for (int c = 0; c < n; c++) {
-            int r = 0;
-            while (r < n) {
-                if (clue[r][c]) {
-                    r++;
-                    continue;
-                }
-                int start = r;
-                while (r < n && !clue[r][c]) {
-                    r++;
-                }
-                if (r - start >= MIN_LEN) {
-                    list.add(new Slot(start, c, Direction.DOWN, r - start));
-                }
-            }
-        }
-        return list;
-    }
-
-    // Назначаем каждому окну свою клетку-задание среди 8 соседей первой буквы.
-    // false, если назначить не получилось.
-    private boolean assignClues(boolean[][] clue, List<Slot> list) {
-        int n = clue.length;
-        int[][] id = new int[n][n];
-        List<int[]> cells = new ArrayList<>();
-        for (int r = 0; r < n; r++) {
-            for (int c = 0; c < n; c++) {
-                if (clue[r][c]) {
-                    id[r][c] = cells.size();
-                    cells.add(new int[]{r, c});
-                } else {
-                    id[r][c] = -1;
-                }
-            }
-        }
-
-        List<List<Integer>> adj = new ArrayList<>();
-        for (Slot s : list) {
-            // сначала клетка прямо перед словом (так обычно и бывает), потом остальные
-            int pr = s.startRow - (s.dir == Direction.DOWN ? 1 : 0);
-            int pc = s.startCol - (s.dir == Direction.RIGHT ? 1 : 0);
-            int first = -1;
-            if (pr >= 0 && pc >= 0 && id[pr][pc] >= 0) {
-                first = id[pr][pc];
-            }
-            List<Integer> others = new ArrayList<>();
-            for (int dr = -1; dr <= 1; dr++) {
-                for (int dc = -1; dc <= 1; dc++) {
-                    int r = s.startRow + dr;
-                    int c = s.startCol + dc;
-                    if ((dr != 0 || dc != 0) && r >= 0 && c >= 0 && r < n && c < n
-                            && id[r][c] >= 0 && id[r][c] != first) {
-                        others.add(id[r][c]);
-                    }
-                }
-            }
-            Collections.shuffle(others, random);
-            if (first >= 0) {
-                others.add(0, first);
-            }
-            adj.add(others);
-        }
-
-        int[] owner = new int[cells.size()];
-        for (int k = 0; k < owner.length; k++) {
-            owner[k] = -1;
-        }
-        for (int s = 0; s < list.size(); s++) {
-            if (!augment(s, adj, owner, new boolean[owner.length])) {
-                return false;
-            }
-        }
-        for (int k = 0; k < owner.length; k++) {
-            if (owner[k] >= 0) {
-                list.get(owner[k]).clueRow = cells.get(k)[0];
-                list.get(owner[k]).clueCol = cells.get(k)[1];
-            }
-        }
-        return true;
-    }
-
-    // Поиск увеличивающей цепи (алгоритм Куна)
-    private boolean augment(int s, List<List<Integer>> adj, int[] owner, boolean[] seen) {
-        for (int k : adj.get(s)) {
-            if (seen[k]) {
-                continue;
-            }
-            seen[k] = true;
-            if (owner[k] < 0 || augment(owner[k], adj, owner, seen)) {
-                owner[k] = s;
-                return true;
-            }
-        }
-        return false;
-    }
-
     // ---------- Словарь с индексом ----------
 
-    private Map<Integer, Bucket> buildBuckets(List<String> words, int maxLen) {
+    private Map<Integer, Bucket> buildBuckets(List<String> words) {
         Map<Integer, Bucket> map = new HashMap<>();
         Set<String> seen = new HashSet<>();
         for (String w : words) {
             int len = w.length();
-            if (len < MIN_LEN || len > maxLen || !isRussian(w) || !seen.add(w)) {
+            if (len < TemplateGenerator.MIN_LEN || len > TemplateGenerator.MAX_LEN
+                    || !isRussian(w) || !seen.add(w)) {
                 continue;
             }
             Bucket b = map.get(len);
@@ -403,7 +133,7 @@ public class GridGenerator {
         return true;
     }
 
-    // Слова, подходящие в окно с учётом уже стоящих букв
+    // Слова, подходящие в отрезок с учётом уже стоящих букв
     private BitSet domain(Slot s) {
         Bucket b = buckets.get(s.length);
         if (b == null) {
@@ -412,7 +142,7 @@ public class GridGenerator {
         BitSet d = (BitSet) b.all.clone();
         d.andNot(b.used);
         for (int i = 0; i < s.length && !d.isEmpty(); i++) {
-            char ch = grid[s.row(i)][s.col(i)];
+            char ch = grid[s.rowAt(i)][s.colAt(i)];
             if (ch != 0) {
                 d.and(b.index[i][ch - 'А']);
             }
@@ -422,15 +152,15 @@ public class GridGenerator {
 
     // ---------- ЭТАП 2: подбор слов с откатом ----------
 
-    // true = все окна заполнены
+    // true = все отрезки заполнены
     private boolean solve() {
         nodes++;
         if (nodes > NODE_LIMIT || System.currentTimeMillis() > deadline) {
             return false;
         }
 
-        // Окно с наименьшим числом вариантов.
-        // Если хотя бы у одного окна вариантов нет, шаг назад.
+        // Отрезок с наименьшим числом вариантов.
+        // Если хотя бы у одного вариантов нет, шаг назад.
         int pick = -1;
         BitSet pickDom = null;
         int pickCount = Integer.MAX_VALUE;
@@ -479,8 +209,8 @@ public class GridGenerator {
             // ставим слово, запоминая, какие клетки были пустыми
             boolean[] wasEmpty = new boolean[slot.length];
             for (int i = 0; i < slot.length; i++) {
-                int r = slot.row(i);
-                int c = slot.col(i);
+                int r = slot.rowAt(i);
+                int c = slot.colAt(i);
                 wasEmpty[i] = grid[r][c] == 0;
                 grid[r][c] = w.charAt(i);
             }
@@ -501,7 +231,7 @@ public class GridGenerator {
             doneCount--;
             for (int i = 0; i < slot.length; i++) {
                 if (wasEmpty[i]) {
-                    grid[slot.row(i)][slot.col(i)] = 0;
+                    grid[slot.rowAt(i)][slot.colAt(i)] = 0;
                 }
             }
             if (nodes > NODE_LIMIT) {
@@ -519,7 +249,8 @@ public class GridGenerator {
                 Slot slot = slots.get(s);
                 list.add(new Entry(chosen[s], "Подсказка",
                         slot.clueRow, slot.clueCol,
-                        slot.startRow, slot.startCol, slot.dir));
+                        slot.row, slot.col,
+                        slot.horizontal ? Direction.RIGHT : Direction.DOWN));
             }
         }
         best = list;

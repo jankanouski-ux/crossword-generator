@@ -56,7 +56,7 @@ public class TemplateGenerator {
             boolean[][] clue = new boolean[n][n];
             for (int r = 0; r < n; r++) {
                 for (int c = 0; c < n; c++) {
-                    clue[r][c] = random.nextDouble() < 0.25;
+                    clue[r][c] = random.nextDouble() < 0.15;
                 }
             }
             Template cur = evaluate(clue);
@@ -81,6 +81,7 @@ public class TemplateGenerator {
                 break;
             }
         }
+        if (best != null && best.cost == 0) tidy(best);
         return best;
     }
 
@@ -205,5 +206,44 @@ public class TemplateGenerator {
             }
         }
         return false;
+    }
+    // Меняем местами задания, если обоим словам от этого станет лучше
+    private void tidy(Template t) {
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (int i = 0; i < t.slots.size(); i++) {
+                for (int j = i + 1; j < t.slots.size(); j++) {
+                    Slot a = t.slots.get(i);
+                    Slot b = t.slots.get(j);
+                    if (!near(a, b.clueRow, b.clueCol) || !near(b, a.clueRow, a.clueCol)) {
+                        continue; // слову не подходит чужая клетка
+                    }
+                    int before = badness(a, a.clueRow, a.clueCol) + badness(b, b.clueRow, b.clueCol);
+                    int after = badness(a, b.clueRow, b.clueCol) + badness(b, a.clueRow, a.clueCol);
+                    if (after < before) {
+                        int r = a.clueRow;
+                        int c = a.clueCol;
+                        a.clueRow = b.clueRow;
+                        a.clueCol = b.clueCol;
+                        b.clueRow = r;
+                        b.clueCol = c;
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+
+    // Клетка (r,c) — одна из 8 соседних с первой буквой слова?
+    private boolean near(Slot s, int r, int c) {
+        return Math.abs(r - s.row) <= 1 && Math.abs(c - s.col) <= 1;
+    }
+
+    // 0 = задание стоит прямо перед словом (слева или сверху), 1 = иначе
+    private int badness(Slot s, int r, int c) {
+        int prevRow = s.row - (s.horizontal ? 0 : 1);
+        int prevCol = s.col - (s.horizontal ? 1 : 0);
+        return (r == prevRow && c == prevCol) ? 0 : 1;
     }
 }

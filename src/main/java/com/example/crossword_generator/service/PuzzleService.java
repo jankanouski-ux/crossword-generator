@@ -1,6 +1,7 @@
 package com.example.crossword_generator.service;
 
 import com.example.crossword_generator.generator.GridGenerator;
+import com.example.crossword_generator.generator.TemplateGenerator;
 import com.example.crossword_generator.model.Difficulty;
 import com.example.crossword_generator.model.Entry;
 import com.example.crossword_generator.model.Puzzle;
@@ -24,7 +25,7 @@ public class PuzzleService {
     public Puzzle create(Difficulty difficulty, int size) {
         // 1. Слова нужной сложности, длиной от 3 до size-1
         List<String> words = new ArrayList<>();
-        for (int len = 3; len < size; len++) {
+        for (int len = TemplateGenerator.MIN_LEN; len <= TemplateGenerator.MAX_LEN; len++) {
             words.addAll(dictionary.find(difficulty, len));
         }
 
