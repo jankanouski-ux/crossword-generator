@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class PuzzleService {
@@ -33,9 +34,15 @@ public class PuzzleService {
         Puzzle puzzle = generator.generate(size, words);
 
         // 3. Подсказки только для слов, которые попали в сетку
+        List<String> answers = new ArrayList<>();
+        for (Entry e : puzzle.entries()) {
+            answers.add(e.answer());
+        }
+        Map<String, String> clues = clueProvider.getClues(answers);
+
         List<Entry> result = new ArrayList<>();
         for (Entry e : puzzle.entries()) {
-            result.add(e.withClue(clueProvider.getClue(e.answer())));
+            result.add(e.withClue(clues.get(e.answer())));
         }
         return new Puzzle(size, result);
     }
