@@ -50,14 +50,17 @@
         <div class="board" id="board" role="grid" aria-label="Игровое поле"
              th:style="'grid-template-columns: repeat(' + ${puzzle.size} + ', 1fr);
                 grid-template-rows: repeat(' + ${puzzle.size} + ', 1fr)'">
-            <th:block th:each="row : ${grid}">
+            <th:block th:each="row, rowStat : ${grid}">
                 <div class="board__cell"
-                     th:each="cell : ${row}"
+                     th:each="cell, colStat : ${row}"
                      th:classappend="${cell.cssClass()}"
-                     th:attr="data-letter=${cell.letter}">
+                     th:attr="data-row=${rowStat.index}, data-col=${colStat.index}">
       <span class="board__clue"
             th:if="${cell.entry != null}"
-            th:text="${cell.entry.clue} + ' ' + ${cell.entry.arrow()}"></span>
+            th:attr="data-answer=${cell.entry.answer}, data-clue=${cell.entry.clue},
+                     data-start-row=${cell.entry.startRow}, data-start-col=${cell.entry.startCol},
+                     data-direction=${cell.entry.direction}"
+            th:text="${cell.entry.clue}"></span>
                 </div>
             </th:block>
         </div>
@@ -121,6 +124,13 @@
     </main>
 </div>
 
-<!-- <script src="play.js"></script> -->
+<dialog class="win" id="win" aria-labelledby="win-title">
+    <div class="win__medal" aria-hidden="true">🏅</div>
+    <h2 class="win__title" id="win-title">Сканворд решен!</h2>
+    <p class="win__text">Все слова разгаданы. Отличная работа!</p>
+    <a class="btn-honey win__next" href="/" autofocus>Далее</a>
+</dialog>
+
+<script type="module" src="/play/main.js"></script>
 </body>
 </html>
